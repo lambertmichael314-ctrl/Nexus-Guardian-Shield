@@ -1,0 +1,209 @@
+import React, { useEffect, useState } from 'react'
+import {
+  Search, Plus, Trash2, Edit3, Shield, X,
+  ChevronLeft, ChevronRight, Filter,
+} from 'lucide-react'
+import { listIOCs, createIOC, updateIOC, deleteIOC } from '../services/api'
+
+const IOC_TYPES = ['ipv4','ipv6','domain','url','md5','sha1','sha256','email','file_path','mutex','yara']
+
+export default function Intelligence() {
+  const [items, setItems] = useState([])
+  const [total, setTotal] = useState(0)
+  const [limit] = useState(15)
+  const [offset, setOffset] = useState(0)
+  const [search, setSearch] = useState('')
+  const [filterType, setFilterType] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState({
+    ioc_type:'ipv4',value:'',source:'',confidence:0.8,tags:'',notes:'',is_active:true,
+  })
+
+  async function load() {
+    setLoading(true)
+    try {
+      const params = { limit, offset }
+      if (search) params.search = search
+      if (filterType) params.ioc_type = filterType
+      const { data } = await listIOCs(params)
+      setItems(data.items||[])
+      setTotal(data.total||0)
+    } catch(e){ console.error(e) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(()=>{ load() },[offset,search,filterType])
+
+  const resetForm = () => {
+    setForm({ ioc_type:'ipv4',value:'',source:'',confidence:0.8,tags:'',notes:'',is_active:true })
+    setEditing(null)
+  }
+  const openCreate = () => { resetForm(); setModalOpen(true) }
+  const openEdit = (ioc) => {
+    setForm({ ioc_type:ioc.ioc_type,value:ioc.value,source:ioc.source||'',confidence:ioc.confidence??0.8,tags:ioc.tags||'',notes:ioc.notes||'',is_active:ioc.is_active })
+    setEditing(ioc.id)
+    setModalOpen(true)
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    try {
+      const payload = { ...form, confidence: parseFloat(form.confidence) }
+      if (editing) await updateIOC(editing,payload)
+      else await createIOC(payload)
+      setModalOpen(false)
+      resetForm()
+      load()
+    } catch(err) {
+      alert(err.response?.data?.error?.message || err.response?.data?.detail || 'Save failed')
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Deactivate this IOC?')) return
+    try { await deleteIOC(id); load() } catch(e){ alert('Delete failed') }
+  }
+
+  const pages = Math.ceil(total/limit)
+  const currentPage = Math.floor(offset/limit)+1
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-cyber-blue" /> Threat Intelligence
+        </h1>
+        <button onClick={openCreate} className="btn-primary text-sm">
+          <Plus className="w-4 h-4" /> Add IOC
+        </button>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <input type="text" value={search} onChange={(e)=>{setSearch(e.target.value);setOffset(0)}} placeholder="Search IOC value…" className="input-dark pl-9" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-slate-500" />
+          <select value={filterType} onChange={(e)=>{setFilterType(e.target.value);setOffset(0)}} className="input-dark w-40">
+            <option value="">All Types</option>
+            {IOC_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="glass-panel overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900/50 text-slate-500 text-xs uppercase tracking-wider">
+              <tr>
+                <th className="px-4 py-3 text-left">Type</th>
+                <th className="px-4 py-3 text-left">Value</th>
+                <th className="px-4 py-3 text-left">Source</th>
+                <th className="px-4 py-3 text-left">Confidence</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {loading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center">
+                  <div className="w-6 h-6 border-2 border-cyber-blue/30 border-t-cyber-blue rounded-full animate-spin mx-auto" />
+                </td></tr>
+              ) : items.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No indicators found.</td></tr>
+              ) : (
+                items.map((ioc) => (
+                  <tr key={ioc.id} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="px-4 py-3"><span className="badge-blue">{ioc.ioc_type}</span></td>
+                    <td className="px-4 py-3 font-mono text-slate-300 max-w-xs truncate">{ioc.value}</td>
+                    <td className="px-4 py-3 text-slate-400">{ioc.source||'—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                          <div className="h-full rounded-full bg-cyber-blue" style={{width:`${(ioc.confidence||0)*100}%`}} />
+                        </div>
+                        <span className="text-xs text-slate-400">{Math.round((ioc.confidence||0)*100)}%</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {ioc.is_active ? <span className="badge-green">Active</span> : <span className="badge-amber">Inactive</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={()=>openEdit(ioc)} className="p-1.5 rounded-md text-slate-400 hover:text-cyber-blue hover:bg-cyber-blue/10 transition-colors" title="Edit"><Edit3 className="w-4 h-4" /></button>
+                        <button onClick={()=>handleDelete(ioc.id)} className="p-1.5 rounded-md text-slate-400 hover:text-cyber-red hover:bg-cyber-red/10 transition-colors" title="Deactivate"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-slate-800 flex items-center justify-between">
+          <span className="text-xs text-slate-500">Showing {items.length} of {total} results</span>
+          <div className="flex items-center gap-2">
+            <button onClick={()=>setOffset(o=>Math.max(0,o-limit))} disabled={offset===0} className="p-1.5 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="text-xs text-slate-400">Page {currentPage} of {pages||1}</span>
+            <button onClick={()=>setOffset(o=>o+limit)} disabled={offset+limit>=total} className="p-1.5 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+          </div>
+        </div>
+      </div>
+
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="glass-panel w-full max-w-lg max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+              <h3 className="text-base font-semibold text-slate-100">{editing ? 'Edit Indicator' : 'Add New Indicator'}</h3>
+              <button onClick={()=>{setModalOpen(false);resetForm()}} className="p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"><X className="w-4 h-4" /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Type</label>
+                  <select name="ioc_type" value={form.ioc_type} onChange={(e)=>setForm(f=>({...f,ioc_type:e.target.value}))} className="input-dark" required>
+                    {IOC_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Confidence (0–1)</label>
+                  <input type="number" step="0.01" min="0" max="1" value={form.confidence} onChange={(e)=>setForm(f=>({...f,confidence:e.target.value}))} className="input-dark" required />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Value</label>
+                <input type="text" value={form.value} onChange={(e)=>setForm(f=>({...f,value:e.target.value}))} className="input-dark" placeholder="e.g. 192.168.1.1 or evil.com" required />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Source</label>
+                <input type="text" value={form.source} onChange={(e)=>setForm(f=>({...f,source:e.target.value}))} className="input-dark" placeholder="e.g. OTX, MISP, internal" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Tags (comma-separated)</label>
+                  <input type="text" value={form.tags} onChange={(e)=>setForm(f=>({...f,tags:e.target.value}))} className="input-dark" placeholder="apt, critical" />
+                </div>
+                <div className="flex items-end pb-1">
+                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input type="checkbox" checked={form.is_active} onChange={(e)=>setForm(f=>({...f,is_active:e.target.checked}))} className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyber-blue" />
+                    Active
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Notes</label>
+                <textarea value={form.notes} onChange={(e)=>setForm(f=>({...f,notes:e.target.value}))} className="input-dark min-h-[80px] resize-none" placeholder="Optional context…" />
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button type="button" onClick={()=>{setModalOpen(false);resetForm()}} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">Cancel</button>
+                <button type="submit" className="btn-primary text-sm">{editing ? 'Update' : 'Create'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
